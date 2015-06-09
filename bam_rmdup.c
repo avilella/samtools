@@ -176,10 +176,10 @@ void bam_rmdup_core(samfile_t *in, samfile_t *out, int is_barc)
 		barc = barc / 10;
 		/* printf("final b %llu\n", barc); */
 		/* printf("pos %llu isize %llu orignkey %llu\n", c->pos, c->isize, key); */
-		uint64_t key = ((uint64_t)c->pos << 32) | ((c->isize & 0xffff) << 16) | (barc & 0xffff);
-		/* printf("pos %llu isize %llu finalkey %llu\n", c->pos, c->isize, key); */
+		key = ((uint64_t)c->pos << 32) | ((c->isize & 0xffff) << 16) | (barc & 0xffff);
 		free(s->s); free(s); free(fields);
 	    }
+	    /* printf("pos %llu isize %llu finalkey %llu\n", c->pos, c->isize, key); */
             const char *lib;
             lib_aux_t *q;
             int ret;

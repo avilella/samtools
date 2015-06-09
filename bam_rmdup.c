@@ -33,6 +33,9 @@ DEALINGS IN THE SOFTWARE.  */
 typedef bam1_t *bam1_p;
 
 #include "htslib/khash.h"
+#include "htslib/kstring.h"
+#include <htslib/khash_str2int.h>
+
 KHASH_SET_INIT_STR(name)
 KHASH_MAP_INIT_INT64(pos, bam1_p)
 
@@ -112,7 +115,7 @@ static inline int sum_qual(const bam1_t *b)
     return q;
 }
 
-void bam_rmdup_core(samfile_t *in, samfile_t *out)
+void bam_rmdup_core(samfile_t *in, samfile_t *out, int is_barc)
 {
     bam1_t *b;
     int last_tid = -1, last_pos = -1;
@@ -151,6 +154,32 @@ void bam_rmdup_core(samfile_t *in, samfile_t *out)
             samwrite(out, b);
         } else if (c->isize > 0) { // paired, head
             uint64_t key = (uint64_t)c->pos<<32 | c->isize;
+	    /* If option -b is used, use the barcode in the read i */
+	    if (is_barc == 1) {
+		kstring_t *s; int *fields, n;
+		s = (kstring_t*)calloc(1, sizeof(kstring_t));
+		ksprintf(s, "%s",b->data);
+		fields = ksplit(s, 58, &n);
+		/* printf("bread = '%s'\n", b->data); */
+		/* printf("pfield[%d] = '%s' %d\n", n-1, s->s + fields[n-1], sum_qual(b)); */
+		/* ksprintf(s, "%s",s->s + fields[n-1]); */
+		char barcode[128];
+		sprintf(barcode,"%s",s->s + fields[n-1]);
+		/* printf("barcode %s\n", barcode); */
+		int i;
+		uint64_t barc = 0;
+		for (i = strlen(barcode)-1; i >= 0; --i) {
+		    uint64_t t = seq_nt16_table[(int)barcode[i]];
+		    barc += t; barc = barc * 10;
+		    /* printf("i %d d %llu b %llu\n", i, t, barc); */
+		}
+		barc = barc / 10;
+		/* printf("final b %llu\n", barc); */
+		/* printf("pos %llu isize %llu orignkey %llu\n", c->pos, c->isize, key); */
+		uint64_t key = ((uint64_t)c->pos << 32) | ((c->isize & 0xffff) << 16) | (barc & 0xffff);
+		/* printf("pos %llu isize %llu finalkey %llu\n", c->pos, c->isize, key); */
+		free(s->s); free(s); free(fields);
+	    }
             const char *lib;
             lib_aux_t *q;
             int ret;
@@ -203,19 +232,21 @@ void bam_rmdupse_core(samfile_t *in, samfile_t *out, int force_se);
 
 int bam_rmdup(int argc, char *argv[])
 {
-    int c, is_se = 0, force_se = 0;
+    int c, is_se = 0, force_se = 0, is_barc = 0;
     samfile_t *in, *out;
-    while ((c = getopt(argc, argv, "sS")) >= 0) {
+    while ((c = getopt(argc, argv, "sSb")) >= 0) {
         switch (c) {
         case 's': is_se = 1; break;
         case 'S': force_se = is_se = 1; break;
+        case 'b': is_barc = 1; break;
         }
     }
     if (optind + 2 > argc) {
         fprintf(stderr, "\n");
-        fprintf(stderr, "Usage:  samtools rmdup [-sS] <input.srt.bam> <output.bam>\n\n");
+        fprintf(stderr, "Usage:  samtools rmdup [-sSb] <input.srt.bam> <output.bam>\n\n");
         fprintf(stderr, "Option: -s    rmdup for SE reads\n");
-        fprintf(stderr, "        -S    treat PE reads as SE in rmdup (force -s)\n\n");
+        fprintf(stderr, "        -S    treat PE reads as SE in rmdup (force -s)\n");
+        fprintf(stderr, "        -b    use barcode in ReadID:NNNNNN to distinguish duplicates\n\n");
         return 1;
     }
     in = samopen(argv[optind], "rb", 0);
@@ -225,7 +256,7 @@ int bam_rmdup(int argc, char *argv[])
         return 1;
     }
     if (is_se) bam_rmdupse_core(in, out, force_se);
-    else bam_rmdup_core(in, out);
+    else bam_rmdup_core(in, out, is_barc);
     samclose(in); samclose(out);
     return 0;
 }
